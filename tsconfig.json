@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "target": "es2023", "module": "nodenext", "strict": true, "noEmit": true,
+    "allowImportingTsExtensions": true, "skipLibCheck": true, "types": ["node"], "lib": ["es2023", "dom"]
+  },
+  "include": ["src"]
+}

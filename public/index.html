@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TV Cast">
+<meta name="theme-color" content="#161A26">
+<title>TV Cast</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --night: #161A26;   /* page */
+    --surface: #212637; /* now-playing panel */
+    --raised: #2B3147;  /* buttons */
+    --text: #ECEEF5;
+    --muted: #8B91A7;
+    --amber: #FFB547;   /* the one accent: play button, progress */
+    --track: #3A4058;
+    --danger: #FF7A7A;
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--night); color: var(--text); }
+  body {
+    min-height: 100dvh;
+    padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 22px;
+    max-width: 480px; margin: 0 auto;
+    -webkit-user-select: none; user-select: none;
+  }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  svg { display: block; }
+
+  /* now playing */
+  .now { background: var(--surface); border-radius: 22px; padding: 18px 18px 14px; }
+  #title { font-size: 21px; font-weight: 700; line-height: 1.25; margin: 0;
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #title.empty { color: var(--muted); font-weight: 600; }
+  #msg { margin-top: 6px; font-size: 14px; color: var(--muted); min-height: 1.3em; }
+  #msg.err { color: var(--danger); }
+  .times { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted);
+           font-variant-numeric: tabular-nums; margin-top: 4px; }
+  #dur { padding: 2px 0 2px 12px; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 36px; margin: 10px 0 0; background: transparent; }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 8px; border-radius: 4px;
+    background: linear-gradient(var(--fill, var(--amber)), var(--fill, var(--amber))) 0 / var(--p, 0%) 100% no-repeat, var(--track);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 26px; height: 26px; margin-top: -9px; border-radius: 50%;
+    background: var(--text); box-shadow: 0 2px 6px #0009;
+  }
+  input[type=range]:active::-webkit-slider-thumb { transform: scale(1.15); }
+
+  /* seek pad: back row above, forward row below, nearest-to-zero in the middle */
+  .pad { display: grid; gap: 8px; }
+  .seek { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .seek button {
+    background: var(--raised); border-radius: 14px; padding: 12px 0 10px; line-height: 1.1;
+    font-variant-numeric: tabular-nums; transition: transform .08s, background .08s;
+  }
+  .seek b { display: block; font-size: 18px; font-weight: 700; }
+  .seek small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .seek button:active, .icon:active { transform: scale(.94); background: var(--track); }
+
+  /* transport */
+  .transport { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: center; }
+  .icon { width: 58px; height: 58px; border-radius: 50%; background: var(--raised); display: grid; place-items: center;
+          transition: transform .08s, background .08s; }
+  #pp { width: 92px; height: 92px; border-radius: 50%; background: var(--amber); color: #1B1408; display: grid; place-items: center;
+        box-shadow: 0 8px 28px #FFB54733; transition: transform .1s; }
+  #pp:active { transform: scale(.94); }
+
+  /* volume */
+  .vol { display: flex; align-items: center; gap: 12px; }
+  .vol input { margin: 0; --fill: var(--text); }
+  #volv { width: 30px; text-align: right; font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* while the TV is loading every control is dimmed: it rejects commands then */
+  body.busy .seek, body.busy #pp, body.busy #seek { opacity: .4; pointer-events: none; }
+
+  /* open by link */
+  form { display: flex; gap: 8px; margin-top: auto; }
+  #u { flex: 1; min-width: 0; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--raised); background: transparent;
+       color: var(--text); font: inherit; font-size: 16px; }
+  #u::placeholder { color: var(--muted); }
+  form button { padding: 0 18px; border-radius: 14px; background: var(--raised); font-weight: 700; }
+  form button:disabled { opacity: .5; }
+
+  /* series line in the now-playing panel */
+  .ep { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+  .ep[hidden] { display: none; }
+  #epinfo { font-size: 15px; font-weight: 600; }
+  .pill { background: var(--raised); border-radius: 999px; padding: 9px 16px; font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .pill.amber { background: var(--amber); color: #1B1408; }
+  .pill:active { transform: scale(.95); }
+
+  /* recently watched */
+  .recent h2 { font-size: 17px; margin: 0 0 6px; }
+  .recent[hidden] { display: none; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--raised); }
+  .row > div:first-child { min-width: 0; }
+  .row:first-of-type { border-top: 0; }
+  .row b { font-size: 16px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row small { color: var(--muted); font-size: 13px; }
+  .row .acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+  .row .acts .pill { padding: 8px 12px; font-size: 14px; }
+  .x { width: 34px; height: 34px; border-radius: 50%; color: var(--muted); display: grid; place-items: center; }
+
+  /* episode sheet */
+  .sheet { position: fixed; inset: 0; background: #0009; display: flex; align-items: flex-end; z-index: 10; }
+  .sheet[hidden] { display: none; }
+  .sheet > div { background: var(--surface); width: 100%; max-width: 480px; margin: 0 auto; max-height: 82dvh; overflow-y: auto;
+                 border-radius: 24px 24px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom)); }
+  .sheet header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .sheet h2 { margin: 0; font-size: 19px; }
+  #sstatus { color: var(--muted); font-size: 14px; margin: 6px 0 0; min-height: 1.2em; }
+  .seasons { display: flex; gap: 8px; overflow-x: auto; padding: 12px 0; scrollbar-width: none; }
+  .seasons button { flex: none; background: var(--raised); border-radius: 999px; padding: 8px 14px; font-weight: 700; font-size: 15px; }
+  .seasons button.on { background: var(--amber); color: #1B1408; }
+  .eps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .eps button { background: var(--raised); border-radius: 12px; padding: 13px 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .eps button.seen { color: var(--muted); }
+  .eps button.cur { box-shadow: inset 0 0 0 2px var(--amber); color: var(--amber); }
+  .manual { display: flex; gap: 8px; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--raised); font-size: 14px; color: var(--muted); }
+  .manual input { width: 56px; padding: 10px; border-radius: 10px; border: 1px solid var(--raised); background: transparent; color: var(--text); font: inherit; font-size: 16px; text-align: center; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<section class="now" aria-live="polite">
+  <h1 id="title" class="empty">Nothing is playing on the TV</h1>
+  <div id="msg">Paste a page link below or send one from the bookmark.</div>
+  <input id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="Position">
+  <div class="times"><span id="pos">0:00</span><button id="dur" aria-label="Total / remaining time">—</button></div>
+  <div class="ep" id="ep" hidden><span id="epinfo"></span><button class="pill" id="epbtn">Episodes</button></div>
+  <button class="pill amber" id="resume" hidden style="margin-top:12px"></button>
+</section>
+
+<div class="pad">
+<div class="seek" aria-label="Rewind">
+  <button data-d="-900"><b>−15</b><small>min</small></button>
+  <button data-d="-300"><b>−5</b><small>min</small></button>
+  <button data-d="-60"><b>−1</b><small>min</small></button>
+  <button data-d="-30"><b>−30</b><small>sec</small></button>
+  <button data-d="-10"><b>−10</b><small>sec</small></button>
+</div>
+<div class="seek" aria-label="Fast forward">
+  <button data-d="10"><b>+10</b><small>sec</small></button>
+  <button data-d="30"><b>+30</b><small>sec</small></button>
+  <button data-d="60"><b>+1</b><small>min</small></button>
+  <button data-d="300"><b>+5</b><small>min</small></button>
+  <button data-d="900"><b>+15</b><small>min</small></button>
+</div>
+</div>
+
+<div class="transport">
+  <button class="icon" id="stop" aria-label="Stop">
+    <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="3" fill="currentColor"/></svg>
+  </button>
+  <button id="pp" aria-label="Play"></button>
+  <button class="icon" id="mute" aria-label="Mute"></button>
+</div>
+
+<div class="vol">
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="color:var(--muted)"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/></svg>
+  <input id="vol" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
+  <span id="volv">0</span>
+</div>
+
+<section class="recent" id="recent" hidden aria-label="Recently watched">
+  <h2>Recently watched</h2>
+  <div id="rows"></div>
+</section>
+
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sname">
+  <div>
+    <header><h2 id="sname">Episodes</h2><button class="x" id="sclose" aria-label="Close">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></header>
+    <p id="sstatus"></p>
+    <button class="pill amber" id="snext" hidden></button>
+    <div class="seasons" id="seasons"></div>
+    <div class="eps" id="eps"></div>
+    <form class="manual" id="manual">
+      Not listed: <input id="ms" inputmode="numeric" aria-label="Season" placeholder="S"> <input id="me" inputmode="numeric" aria-label="Episode" placeholder="E">
+      <button class="pill">Play</button>
+    </form>
+  </div>
+</div>
+
+<form id="f">
+  <input id="u" type="url" inputmode="url" placeholder="Paste a page link" autocomplete="off" aria-label="Page link">
+  <button>Play</button>
+</form>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fmt = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+  const fill = (r) => r.style.setProperty('--p', (r.max > 0 ? (r.value / r.max) * 100 : 0) + '%');
+  const ICON = {
+    play: '<svg width="34" height="34" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></svg>',
+    pause: '<svg width="34" height="34" viewBox="0 0 24 24"><rect x="6" y="5" width="4.2" height="14" rx="1.4" fill="currentColor"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.4" fill="currentColor"/></svg>',
+    sound: '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
+    muted: '<svg width="24" height="24" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z" fill="currentColor"/><path d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  };
+  const STATE = { PLAYING: 'Playing', PAUSED_PLAYBACK: 'Paused', STOPPED: 'Stopped', TRANSITIONING: 'TV is loading…', NO_MEDIA_PRESENT: 'Idle' };
+  let st = {}, dragging = { seek: false, vol: false }, hold = 0, remaining = false;
+
+  // a message overrides the TV state line for a few seconds
+  const msg = (t, err = false, ms = 4000) => { $('msg').textContent = t; $('msg').classList.toggle('err', err); hold = t ? Date.now() + ms : 0; };
+
+  async function call(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error);
+    return j;
+  }
+  const act = (path, note) => { if (note) msg(note); return call(path).then(() => setTimeout(refresh, 400)).catch((e) => msg(e.message, true, 8000)); };
+
+  const epLabel = (s, e) => `Season ${s}, Episode ${e}`;
+  let starting = false;
+  // every "play this" path goes through here: link box, recent list, episode sheet
+  async function start(path, body, label = 'Looking for the video…') {
+    if (starting) return;
+    starting = true; msg(label, false, 90000); window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      const j = await call(path, body); setTitle(j.title); msg('Started on the TV'); $('u').value = '';
+      // opened from the start although it was half-watched: offer a jump (not automatic, maybe they want to rewatch)
+      $('resume').hidden = !j.savedPos;
+      if (j.savedPos) {
+        $('resume').textContent = `Resume from ${fmt(j.savedPos)}`;
+        $('resume').onclick = () => { $('resume').hidden = true; act('/seek?t=' + j.savedPos, 'Jumping to where you left off'); };
+        setTimeout(() => ($('resume').hidden = true), 90_000);
+      }
+    }
+    catch (err) { msg(err.message, true, 10000); }
+    starting = false; refresh(); loadRecent();
+  }
+  $('f').onsubmit = (e) => { e.preventDefault(); start('/cast', { url: $('u').value }); };
+
+  // recently watched (stored on the Mac, same list on every device)
+  let recent = [];
+  async function loadRecent() {
+    try { recent = await (await fetch('/history')).json(); } catch { return; }
+    $('recent').hidden = !recent.length;
+    $('rows').replaceChildren(...recent.map((h) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const info = document.createElement('div');
+      info.innerHTML = '<b></b><small></small>';
+      info.querySelector('b').textContent = h.name;
+      const half = h.pos > 60 && !(h.dur && h.pos > h.dur - 60);
+      info.querySelector('small').textContent = (h.series ? epLabel(h.season, h.episode) : 'Movie') + (half ? `, stopped at ${fmt(h.pos)}` : '');
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+      const btn = (text, cls, fn, aria, to = acts) => { const b = document.createElement('button'); b.className = cls; b.innerHTML = text; b.onclick = fn; if (aria) b.setAttribute('aria-label', aria); to.append(b); };
+      if (half) btn('Resume ' + fmt(h.pos), 'pill amber', () => start('/cast', { url: h.url, resume: true }, `${h.name}: resuming from ${fmt(h.pos)}…`));
+      if (h.next) btn('Next episode', half ? 'pill' : 'pill amber', () => start('/cast', { url: h.next.url }, `${h.name}: opening ${epLabel(h.next.season, h.next.episode)}…`));
+      if (!half && !h.next) btn(h.series ? 'Play again' : 'Play', 'pill', () => start('/cast', { url: h.url }));
+      if (h.series) btn('Episodes', 'pill', () => openSheet(h.key));
+      const del = document.createElement('div');
+      btn('<svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>', 'x',
+        async () => { if (confirm(`Remove "${h.name}" from the list?`)) { await call('/history/remove?key=' + encodeURIComponent(h.key)); loadRecent(); } }, 'Remove from list', del);
+      row.append(info, del, acts);
+      return row;
+    }));
+  }
+
+  // episode sheet: seasons as chips, episodes as a number grid
+  let sheet = { key: '', seasons: [], season: 0, episode: 0, show: 0 };
+  async function openSheet(key) {
+    const h = recent.find((x) => x.key === key);
+    sheet = { key, seasons: [], season: h?.season ?? 0, episode: h?.episode ?? 0, show: h?.season ?? 1 };
+    $('sname').textContent = h?.name ?? 'Episodes';
+    $('ms').value = sheet.season || ''; $('me').value = sheet.episode ? sheet.episode + 1 : '';
+    $('seasons').replaceChildren(); $('eps').replaceChildren(); $('snext').hidden = true;
+    $('sstatus').textContent = 'Looking for episodes… (can take 10–15 s on some sites)';
+    $('sheet').hidden = false;
+    try {
+      const r = await (await fetch('/episodes?key=' + encodeURIComponent(key))).json();
+      if (!r.ok) throw new Error(r.error);
+      sheet.seasons = r.seasons ?? [];
+      if (r.name) $('sname').textContent = r.name;
+      $('sstatus').textContent = sheet.seasons.length ? '' : 'No episode list found. You can enter a season and episode below.';
+      if (!sheet.seasons.some((s) => s.season === sheet.show)) sheet.show = sheet.seasons[0]?.season ?? 0;
+      drawSheet();
+    } catch (e) { $('sstatus').textContent = e.message + '. You can enter a season and episode below.'; }
+  }
+  function drawSheet() {
+    const all = sheet.seasons.flatMap((s) => s.episodes.map((e) => ({ season: s.season, ...e })));
+    const next = all[all.findIndex((x) => x.season === sheet.season && x.episode === sheet.episode) + 1];
+    $('snext').hidden = !next || !sheet.episode;
+    if (next) { $('snext').textContent = 'Next: ' + epLabel(next.season, next.episode); $('snext').onclick = () => playEp(next.season, next.episode); }
+    $('seasons').replaceChildren(...sheet.seasons.map((s) => {
+      const b = document.createElement('button');
+      b.textContent = 'Season ' + s.season;
+      b.className = s.season === sheet.show ? 'on' : '';
+      b.onclick = () => { sheet.show = s.season; drawSheet(); };
+      return b;
+    }));
+    const cur = sheet.seasons.find((s) => s.season === sheet.show);
+    $('eps').replaceChildren(...(cur?.episodes ?? []).map((e) => {
+      const b = document.createElement('button');
+      b.textContent = e.episode;
+      b.setAttribute('aria-label', epLabel(cur.season, e.episode));
+      const isCur = cur.season === sheet.season && e.episode === sheet.episode;
+      const seen = cur.season < sheet.season || (cur.season === sheet.season && e.episode < sheet.episode);
+      b.className = isCur ? 'cur' : seen ? 'seen' : '';
+      b.onclick = () => playEp(cur.season, e.episode);
+      return b;
+    }));
+  }
+  function playEp(season, episode) {
+    $('sheet').hidden = true;
+    const name = $('sname').textContent;
+    start(`/play-episode?key=${encodeURIComponent(sheet.key)}&season=${season}&episode=${episode}`, undefined, `${name}: opening ${epLabel(season, episode)}…`);
+  }
+  $('manual').onsubmit = (e) => { e.preventDefault(); const s = Number($('ms').value), ep = Number($('me').value); if (s && ep) playEp(s, ep); };
+  $('sclose').onclick = () => ($('sheet').hidden = true);
+  $('sheet').onclick = (e) => { if (e.target === $('sheet')) $('sheet').hidden = true; };
+  $('epbtn').onclick = () => st.key && openSheet(st.key);
+
+  document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => {
+    const d = Number(b.dataset.d);
+    const n = Math.abs(d), amount = n >= 60 ? `${n / 60} min` : `${n} sec`;
+    act('/seek?d=' + d, `${d < 0 ? 'Rewinding' : 'Skipping ahead'} ${amount}`);
+  }));
+  $('pp').onclick = () => act(st.state === 'PLAYING' ? '/pause' : '/play');
+  $('stop').onclick = () => act('/stop');
+  $('mute').onclick = () => act('/mute?on=' + (st.muted ? 0 : 1));
+  $('dur').onclick = () => { remaining = !remaining; render(); };
+
+  // seek slider: preview while dragging, send on release
+  const seek = $('seek');
+  seek.oninput = () => { dragging.seek = true; fill(seek); $('pos').textContent = fmt(seek.value); };
+  seek.onchange = () => act('/seek?t=' + seek.value, 'Jumping to ' + fmt(seek.value)).finally(() => (dragging.seek = false));
+
+  // volume: sent while dragging (throttled) so the TV reacts live
+  const vol = $('vol'); let volT;
+  vol.oninput = () => {
+    dragging.vol = true; fill(vol); $('volv').textContent = vol.value;
+    clearTimeout(volT); volT = setTimeout(() => call('/volume?v=' + vol.value).catch(() => {}), 120);
+  };
+  vol.onchange = () => setTimeout(() => (dragging.vol = false), 800);
+
+  function setTitle(t) { $('title').textContent = t; $('title').classList.remove('empty'); }
+
+  function render() {
+    const playing = st.state === 'PLAYING';
+    document.body.classList.toggle('busy', st.state === 'TRANSITIONING');
+    $('pp').innerHTML = playing ? ICON.pause : ICON.play;
+    $('pp').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    $('mute').innerHTML = st.muted ? ICON.muted : ICON.sound;
+    $('mute').setAttribute('aria-label', st.muted ? 'Unmute' : 'Mute');
+    if (st.title) setTitle(st.title);
+    $('ep').hidden = !st.season;
+    if (st.season) $('epinfo').textContent = epLabel(st.season, st.episode);
+    if (Date.now() > hold && st.state) { $('msg').textContent = STATE[st.state] ?? st.state; $('msg').classList.remove('err'); }
+    if (!dragging.seek) { seek.max = st.total || 0; seek.value = st.seconds || 0; fill(seek); $('pos').textContent = fmt(st.seconds || 0); }
+    $('dur').textContent = !st.total ? '—' : remaining ? '−' + fmt(st.total - (st.seconds || 0)) : fmt(st.total);
+    if (!dragging.vol && st.volume != null) { vol.value = st.volume; fill(vol); $('volv').textContent = st.volume; }
+  }
+
+  async function refresh() {
+    try { st = await (await fetch('/status')).json(); render(); } catch {}
+  }
+  // poll only while the panel is on screen; a locked phone shouldn't keep pinging the TV
+  render(); refresh(); loadRecent(); setInterval(() => !document.hidden && refresh(), 3000);
+  document.addEventListener('visibilitychange', () => !document.hidden && refresh());
+
+  // bookmarklet lands here as /?cast=<page url>: start it right away, then clean the address bar
+  const auto = new URLSearchParams(location.search).get('cast');
+  if (auto) {
+    history.replaceState(null, '', '/');
+    $('u').value = auto;
+    $('f').requestSubmit();
+  }
+</script>
+</body>
+</html>
